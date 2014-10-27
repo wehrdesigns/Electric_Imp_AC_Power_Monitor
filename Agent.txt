@@ -1,0 +1,179 @@
+// Agent code
+htmltable <- "";
+values <- [0,0,0,0,0,0];
+multiplier <- [
+0.0073,
+0.0018,
+0.0074,
+0,
+0,
+0
+];
+offset <- [
+0,
+-0.07223,
+0,
+0,
+0,
+0
+];
+names <- [
+"Voltage1",
+"Power2",
+"Voltage3",
+"Power4",
+"Power5",
+"Power6"
+];
+ids <- [
+78,
+79,
+80,
+81,
+82,
+83
+];
+
+const html1 = @"<!DOCTYPE html>
+<html lang=""en"">
+    <head>
+        <meta charset=""utf-8"">
+        <meta http-equiv=""refresh"" content=""30"">
+        <meta name=""viewport"" content=""width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"">
+        <meta name=""apple-mobile-web-app-capable"" content=""yes"">
+        <link rel=""apple-touch-icon"" sizes=""114x114"" href=""http://fury.com/imp/snackman-apple-icon-114x114.png"">
+            
+        <script src=""http://code.jquery.com/jquery-1.9.1.min.js""></script>
+        <script src=""http://code.jquery.com/jquery-migrate-1.2.1.min.js""></script>
+        <script src=""http://d2c5utp5fpfikz.cloudfront.net/2_3_1/js/bootstrap.min.js""></script>
+        
+        <link href=""//d2c5utp5fpfikz.cloudfront.net/2_3_1/css/bootstrap.min.css"" rel=""stylesheet"">
+        <link href=""//d2c5utp5fpfikz.cloudfront.net/2_3_1/css/bootstrap-responsive.min.css"" rel=""stylesheet"">
+
+        <title>imp AC Power Monitor</title>
+    </head>
+    <body>
+        <div class='container'>
+            <div class='well' style='max-width: 400px; margin: 0 auto 10px; text-align:left;'>
+                <h1>imp AC Power Monitor<h1>
+                <h1>";
+const html2 = @"</h1>
+            </div>
+        </div>
+    </body>
+</html>";
+
+http.onrequest(function(request, response) {
+    if (request.body == "") {
+//        local power = round((probe1.tofloat() * probe2.tofloat()),0).tostring();
+//        local html = format(html1 + ("%s", probe1) + html2 + ("%s", probe2) + html3 + ("%s", power) + html4);
+        local html = html1 + htmltable + html2;
+        response.send(200, html);
+    }
+    else {
+      try {
+        local data = http.jsondecode(request.body);
+        // make sure we got all the values we're expecting
+        if ("trigger1min" in data) {
+          server.log(data.trigger1min);
+          device.send("Trigger1Min", data);
+          response.send(200, "OK");
+        }
+        else if ("trigger1max" in data) {
+            server.log(data.trigger1max);
+            device.send("Trigger1Max", data);
+            response.send(200, "OK");
+        }
+        else if ("trigger2min" in data) {
+            server.log(data.trigger2min);
+            device.send("Trigger2Min", data);
+            response.send(200, "OK");
+        }
+        else if ("trigger2max" in data) {
+            server.log(data.trigger2max);
+            device.send("Trigger2Max", data);
+            response.send(200, "OK");
+        }
+       else {
+            response.send(500, "Missing Data in Body");
+       }
+      }
+      catch (ex) {
+        response.send(500, "Internal Server Error: " + ex);
+      }
+    }
+});
+
+function get_servertime(){
+    local headers = {"Content-Type": "text/xml"};
+    local servertime_url = "http://your.server.com/servertime";
+    local request = http.get(servertime_url,headers);
+    local response = request.sendsync();
+//    server.log(response.body);
+    local i = response.body.find(".");
+//    server.log(i);
+//    server.log(response.body.slice(0,i));
+    return response.body.slice(0,i);
+}
+
+function post_value(ID,Value,RecordDateTime,Timebase){
+    //Timebase must be one of the following: seconds,minutes,hours,days
+    local headers = {"Content-Type": "text/xml"};
+    local post_url = "http://some.server.com/timeseries/data";
+    local AccessCode = "123";
+    local body = http.urlencode({ID=ID,RecordDateTime=RecordDateTime,Value=Value,Timebase=Timebase,AccessCode=AccessCode});
+//    server.log(body);
+    local request = http.post(post_url,headers,body);
+    local response = request.sendsync();
+//    server.log(response.statuscode+" "+response.body);
+//    foreach(k,v in response){server.log(k+", "+v);}
+//    foreach(v in response.headers){server.log(v);}
+//    return response;
+}
+
+function round(val, decimalPoints) {
+    local f = math.pow(10, decimalPoints) * 1.0;
+    local newVal = val * f;
+    newVal = math.floor(newVal + 0.5);
+    newVal = (newVal * 1.0) / f;
+    
+    return newVal;
+}
+
+function no_neg(val){
+    if (val < 0){
+        return 0;
+    }else{
+        return val;
+    }
+}
+
+device.on("values", function(values) {
+    local t = "<table>";
+    local RecordDateTime = get_servertime();
+    local i;
+    local voltage;
+    local current;
+    local power;
+    local value;
+    for (i = 0; i < values.len(); i+=1){
+//        server.log("value: "+values[i]);
+        if(i == 0 || i == 2){
+            voltage = values[i] * multiplier[i] + offset[i];
+            value = round(voltage,1).tostring();
+        }else{
+            current = values[i] * multiplier[i] + offset[i];
+            power = voltage * current;
+            value = round(power,0).tostring();
+//            value = round(current,4).tostring();
+        }
+        if(multiplier[i] > 0){
+            t += "<tr><td>"+names[i]+"</td><td>"+value+"</td></tr>";
+//        server.log(value);
+//            try{
+//                post_value(ids[i],value,RecordDateTime,"minutes");
+//            }catch(ex){}
+        }
+    }
+    htmltable = t+"</table>";
+});

@@ -1,0 +1,115 @@
+table <- {};
+P1 <- hardware.pin1;
+P2 <- hardware.pin2;
+P5 <- hardware.pin5;
+P7 <- hardware.pin7;
+P8 <- hardware.pin8;
+P9 <- hardware.pin9;
+pins <- [P9,P8,P7,P5,P2,P1];
+names <- ["Volt","Current","Volt2","","",""];
+offsets <- [0,0,0,0,0,0];
+values <- [0,0,0,0,0,0];
+use_data <- 0;
+buffer1 <- blob(80);
+
+function init_save_table(){
+    table <- server.load();
+    table["offsets"] <- offsets;
+    table["values"] <- values;
+    table["task"] <- 0;//the task (or index) to measure
+    server.save(table);
+}
+
+function samples_ready(buffer, length)
+{
+    if ((length > 0) && (use_data == 1)) {
+//        agent.send("bufferFull", buffer);
+//        server.log("length "+length);
+        local t = table["task"];
+        local v;
+        local i;
+        local sum = 0;
+        local offsum = 0;
+        local off = table["offsets"][t];
+        local cursum = 0;
+        // throw away the first samples (something was not stabilized, maybe the voltage reference?)
+        for (i = 20; i < length; i+=2){
+            v = ((buffer[i+1]<<8)+buffer[i]);
+            offsum += v;
+            if (v > off)
+            {
+                v = v - off;
+            }else{
+                v = off - v;
+            }
+            sum += v;
+        }
+        table["offsets"][t] = MovingAve(table["offsets"][t],offsum/30,3);
+        table["values"][t] = MovingAve(table["values"][t],sum/30,3);
+//        server.log(table["offsets"][t]+", "+table["values"][t]);
+//        agent.send(names[t],table["values"][t]);
+    } else {
+//        server.log("Overrun");
+    }
+//    hardware.sampler.stop();
+}
+
+
+function MovingAve(ave,value,PowerOf2Samples)
+{
+    local a;
+    if (PowerOf2Samples > 0)
+    {
+        a = ave;
+        a -= ave >> PowerOf2Samples;
+        a += value >> PowerOf2Samples;
+    }else{
+        a = value;
+    }
+    return a;
+}
+
+function measure()
+{
+    table <- server.load();
+    if(!("offsets" in table)){
+        table["offsets"] <- offsets;
+        }
+    if(!("values" in table)){
+        table["values"] <- values;
+        }
+    if(!("task" in table)){
+        table["task"] <- 0;//the task (or index) to measure
+        }
+    
+    use_data = 1;
+    hardware.sampler.configure(pins[table["task"]], 1800, [buffer1], samples_ready);
+    hardware.sampler.start();
+    imp.wakeup(1,prep_stop_sampler);        
+}
+
+function prep_stop_sampler(){
+    use_data = 0;
+    imp.wakeup(0.1,stop_sampler);
+}
+
+function stop_sampler()
+{
+    hardware.sampler.stop();
+//    server.log(table["task"]+" value: "+table["values"][table["task"]]);
+//    agent.send(names[table["task"]],table["values"][table["task"]]);
+//    server.log(names[table["task"]]+", "+table["values"][table["task"]]);
+    table["task"]++;
+    if (table["task"]>=values.len()){
+        table["task"]=0;
+        server.save(table);
+        agent.send("values",table["values"]);
+        imp.wakeup(50,measure);
+    }else{
+        server.save(table);
+        imp.wakeup(3,measure);
+    }
+}
+
+//init_save_table();
+measure();
